@@ -257,7 +257,7 @@ class DiffusionGPT(nn.Module):
         optim_groups = [
             {
                 "params": [param_dict[pn] for pn in sorted(list(decay))],
-                "weight_decay": train_config.weight_decay,
+                "weight_decay": train_config["weight_decay"],
             },
             {
                 "params": [param_dict[pn] for pn in sorted(list(no_decay))],
@@ -265,7 +265,7 @@ class DiffusionGPT(nn.Module):
             },
         ]
         optimizer = torch.optim.AdamW(
-            optim_groups, lr=train_config.learning_rate, betas=train_config.betas
+            optim_groups, lr=train_config["learning_rate"], betas=train_config["betas"]
         )
         return optimizer
 
