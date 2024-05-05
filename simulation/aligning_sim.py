@@ -43,9 +43,10 @@ class Aligning_Sim(BaseSim):
         self.n_contexts = n_contexts
         self.n_trajectories_per_context = n_trajectories_per_context
 
-    def eval_agent(self, agent, contexts, n_trajectories, mode_encoding, successes, mean_distance, pid, cpu_set):
+    def eval_agent(self, agent, contexts, context_ind, n_trajectories, mode_encoding, successes, mean_distance, pid, cpu_set,
+                   context_id_dict={}):
 
-        print(os.getpid(), cpu_set)
+        # print(os.getpid(), cpu_set)
         assign_process_to_cpu(os.getpid(), cpu_set)
 
         env = Robot_Push_Env(render=self.render, if_vision=self.if_vision)
@@ -55,69 +56,73 @@ class Aligning_Sim(BaseSim):
         torch.manual_seed(pid)
         np.random.seed(pid)
 
-        for context in contexts:
-            for i in range(n_trajectories):
+        print(f'core {cpu_set} proceeds Context {contexts} with Rollout context_ind {context_ind}')
 
-                agent.reset()
+        for i, context in enumerate(contexts):
+            # for i in range(n_trajectories):
 
-                print(f'Context {context} Rollout {i}')
-                # training contexts
-                # env.manager.set_index(context)
-                # obs = env.reset(random=False, context=test_contexts[context])
+            agent.reset()
 
-                # obs = env.reset()
-                obs = env.reset(random=False, context=test_contexts[context])
+            # print(f'Context {context} Rollout {i}')
+            # training contexts
+            # env.manager.set_index(context)
+            # obs = env.reset(random=False, context=test_contexts[context])
 
-                # test contexts
-                # test_context = env.manager.sample()
-                # obs = env.reset(random=False, context=test_context)
+            # obs = env.reset()
+            obs = env.reset(random=False, context=test_contexts[context])
 
-                if self.if_vision:
-                    env_state, bp_image, inhand_image = obs
+            # test contexts
+            # test_context = env.manager.sample()
+            # obs = env.reset(random=False, context=test_context)
+
+            if self.if_vision:
+                env_state, bp_image, inhand_image = obs
+                bp_image = bp_image.transpose((2, 0, 1)) / 255.
+                inhand_image = inhand_image.transpose((2, 0, 1)) / 255.
+
+                des_robot_pos = env_state[:3]
+                done = False
+
+                while not done:
+                    pred_action = agent.predict((bp_image, inhand_image, des_robot_pos), if_vision=self.if_vision)
+                    pred_action = pred_action[0] + des_robot_pos
+
+                    pred_action = np.concatenate((pred_action, [0, 1, 0, 0]), axis=0)
+                    obs, reward, done, info = env.step(pred_action)
+
+                    des_robot_pos = pred_action[:3]
+
+                    robot_pos, bp_image, inhand_image = obs
+
+                    # cv2.imshow('0', bp_image)
+                    # cv2.waitKey(1)
+                    #
+                    # cv2.imshow('1', inhand_image)
+                    # cv2.waitKey(1)
+
                     bp_image = bp_image.transpose((2, 0, 1)) / 255.
                     inhand_image = inhand_image.transpose((2, 0, 1)) / 255.
 
-                    des_robot_pos = env_state[:3]
-                    done = False
+            else:
 
-                    while not done:
-                        pred_action = agent.predict((bp_image, inhand_image, des_robot_pos), if_vision=self.if_vision)
-                        pred_action = pred_action[0] + des_robot_pos
+                pred_action = env.robot_state()
+                done = False
+                while not done:
 
-                        pred_action = np.concatenate((pred_action, [0, 1, 0, 0]), axis=0)
-                        obs, reward, done, info = env.step(pred_action)
+                    obs = np.concatenate((pred_action[:3], obs))
 
-                        des_robot_pos = pred_action[:3]
+                    pred_action = agent.predict(obs)
+                    pred_action = pred_action[0] + obs[:3]
 
-                        robot_pos, bp_image, inhand_image = obs
+                    pred_action = np.concatenate((pred_action, [0, 1, 0, 0]), axis=0)
 
-                        # cv2.imshow('0', bp_image)
-                        # cv2.waitKey(1)
-                        #
-                        # cv2.imshow('1', inhand_image)
-                        # cv2.waitKey(1)
+                    obs, reward, done, info = env.step(pred_action)
 
-                        bp_image = bp_image.transpose((2, 0, 1)) / 255.
-                        inhand_image = inhand_image.transpose((2, 0, 1)) / 255.
-
-                else:
-
-                    pred_action = env.robot_state()
-                    done = False
-                    while not done:
-
-                        obs = np.concatenate((pred_action[:3], obs))
-
-                        pred_action = agent.predict(obs)
-                        pred_action = pred_action[0] + obs[:3]
-
-                        pred_action = np.concatenate((pred_action, [0, 1, 0, 0]), axis=0)
-
-                        obs, reward, done, info = env.step(pred_action)
-
-                mode_encoding[context, i] = torch.tensor(info['mode'])
-                successes[context, i] = torch.tensor(info['success'])
-                mean_distance[context, i] = torch.tensor(info['mean_distance'])
+            ### add mapping to the context
+            ctxt_idx = context_id_dict[context]
+            mode_encoding[ctxt_idx, context_ind[i]] = torch.tensor(info['mode'])
+            successes[ctxt_idx, context_ind[i]] = torch.tensor(info['success'])
+            mean_distance[ctxt_idx, context_ind[i]] = torch.tensor(info['mean_distance'])
 
     ################################
     # we use multi-process for the simulation
@@ -133,42 +138,53 @@ class Aligning_Sim(BaseSim):
         successes = torch.zeros((self.n_contexts, self.n_trajectories_per_context)).share_memory_()
         mean_distance = torch.zeros((self.n_contexts, self.n_trajectories_per_context)).share_memory_()
 
-        contexts = np.arange(self.n_contexts)
-
+        #####################################################################
+        ## get assignment to cores
+        ####################################################################
         self.n_cores = len(cpu_cores) if cpu_cores is not None else 10
-        core_limits = min(self.n_cores, self.n_contexts)
-        cpu_cores = list(cpu_cores)[:core_limits] if cpu_cores is not None else list(range(10))[:core_limits]
 
-        workload = self.n_contexts // core_limits
+        contexts = np.random.randint(0, 60, self.n_contexts) if self.n_contexts != 60 else np.arange(60)
+        context_idx_dict = {c: i for i, c in enumerate(contexts)}
 
-        # num_cpu = mp.cpu_count()
-        # cpu_set = list(range(num_cpu))
+        contexts = np.repeat(contexts, self.n_trajectories_per_context)
 
-        # start = self.seed * 20
-        # end = start + 20
-        #
-        # cpu_set = cpu_set[start:end]
-        # print("there are cpus: ", num_cpu)
+        context_ind = np.arange(self.n_trajectories_per_context)
+        context_ind = np.tile(context_ind, self.n_contexts)
+
+        repeat_nums = (self.n_contexts * self.n_trajectories_per_context) // self.n_cores
+        repeat_res = (self.n_contexts * self.n_trajectories_per_context) % self.n_cores
+
+        workload_array = np.ones([self.n_cores], dtype=int)
+        workload_array[:repeat_res] += repeat_nums
+        workload_array[repeat_res:] = repeat_nums
+
+        assert np.sum(workload_array) == len(contexts)
+
+        ind_workload = np.cumsum(workload_array)
+        ind_workload = np.concatenate(([0], ind_workload))
+        ########################################################################
 
         ctx = mp.get_context('spawn')
 
         p_list = []
         if self.n_cores > 1:
-            for i in range(core_limits):
+            for i in range(self.n_cores):
                 p = ctx.Process(
                     target=self.eval_agent,
                     kwargs={
                         "agent": agent,
-                        "contexts": contexts[i * workload:(i + 1) * workload],
+                        "contexts": contexts[ind_workload[i]:ind_workload[i+1]],
+                        "context_ind": context_ind[ind_workload[i]:ind_workload[i+1]],
                         "n_trajectories": self.n_trajectories_per_context,
                         "mode_encoding": mode_encoding,
                         "successes": successes,
                         "mean_distance": mean_distance,
                         "pid": i,
-                        "cpu_set": set([int(cpu_cores[i])])
+                        "cpu_set": set([int(cpu_cores[i])]),
+                        "context_id_dict": context_idx_dict
                     },
                 )
-                print("Start {}".format(i))
+                # print("Start {}".format(i))
                 p.start()
                 p_list.append(p)
             [p.join() for p in p_list]
