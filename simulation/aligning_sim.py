@@ -130,7 +130,7 @@ class Aligning_Sim(BaseSim):
     # n_trajectories_per_context: test each context for n times, this is mostly used for multi-modal data
     # n_cores: the number of cores used for simulation
     ###############################
-    def test_agent(self, agent, cpu_cores=[0]):
+    def test_agent(self, agent, cpu_cores=None):
 
         # log.info('Starting trained model evaluation')
 
