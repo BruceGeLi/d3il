@@ -125,7 +125,7 @@ class Aligning_Sim(BaseSim):
     # n_trajectories_per_context: test each context for n times, this is mostly used for multi-modal data
     # n_cores: the number of cores used for simulation
     ###############################
-    def test_agent(self, agent, cpu_cores=None):
+    def test_agent(self, agent, cpu_cores=[0]):
 
         # log.info('Starting trained model evaluation')
 
@@ -202,8 +202,9 @@ class Aligning_Sim(BaseSim):
         # wandb.log({'Metrics/entropy': entropy})
         # wandb.log({'Metrics/distance': mean_distance.mean().item()})
 
-        # print(f'Mean Distance {mean_distance.mean().item()}')
-        # print(f'Successrate {success_rate}')
-        # print(f'entropy {entropy}')
+        result_dict = {'score': 0.5 * (success_rate + entropy),
+                       'Metrics/successes': success_rate,
+                       'Metrics/entropy': entropy,
+                       'Metrics/distance': mean_distance.mean().item()}
 
-        return success_rate, entropy.item(), mean_distance.mean().item()
+        return result_dict, mode_encoding
