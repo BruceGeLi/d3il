@@ -71,7 +71,7 @@ class Sorting_Sim(BaseSim):
 
         print(f'core {cpu_set} proceeds Context {contexts} with Rollout context_ind {context_ind}')
 
-        for i, context in contexts:
+        for i, context in enumerate(contexts):
 
             agent.reset()
 
@@ -131,9 +131,9 @@ class Sorting_Sim(BaseSim):
                     obs, reward, done, info = env.step(pred_action)
 
             ctxt_idx = context_id_dict[context]
-            mode_encoding[ctxt_idx, i] = torch.tensor(info['mode'])
-            successes[ctxt_idx, i] = torch.tensor(info['success'])
-            num_complete[ctxt_idx, i] = torch.tensor(len(info['min_inds']))
+            mode_encoding[ctxt_idx, context_ind[i]] = torch.tensor(info['mode'])
+            successes[ctxt_idx, context_ind[i]] = torch.tensor(info['success'])
+            num_complete[ctxt_idx, context_ind[i]] = torch.tensor(len(info['min_inds']))
 
     ################################
     # we use multi-process for the simulation
@@ -192,7 +192,7 @@ class Sorting_Sim(BaseSim):
                         "num_complete": num_complete,
                         "pid": i,
                         "cpu_set": set([int(cpu_cores[i])]), #set(cpu_set[i:i+1]),
-                        "context_idx_dict": context_idx_dict,
+                        "context_id_dict": context_idx_dict,
                     },
                 )
                 # print("Start {}".format(i))
@@ -239,4 +239,4 @@ class Sorting_Sim(BaseSim):
         # print(f'num_complete {num_complete}')
         # print(f'KL {KL}')
 
-        return success_rate, entropy, num_complete
+        return {'success_rate': success_rate, 'entropy': entropy, 'num_complete': num_complete}

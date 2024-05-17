@@ -55,11 +55,11 @@ class Pushing_Sim(BaseSim):
 
         print(f'core {cpu_set} proceeds Context {contexts} with Rollout context_ind {context_ind}')
 
-        for i, context in contexts:
+        for i, context in enumerate(contexts):
 
             agent.reset()
 
-            print(f'Context {context} Rollout {i}')
+            print(f'Context {context} Rollout {context_ind[i]}')
             obs = env.reset(random=False, context=test_contexts[context])
 
             pred_action = env.robot_state()
@@ -78,9 +78,9 @@ class Pushing_Sim(BaseSim):
                 obs, reward, done, info = env.step(pred_action)
 
             ctxt_idx = context_id_dict[context]
-            mode_encoding[ctxt_idx, i] = torch.tensor(info['mode'])
-            successes[ctxt_idx, i] = torch.tensor(info['success'])
-            mean_distance[ctxt_idx, i] = torch.tensor(info['mean_distance'])
+            mode_encoding[ctxt_idx, context_ind[i]] = torch.tensor(info['mode'])
+            successes[ctxt_idx, context_ind[i]] = torch.tensor(info['success'])
+            mean_distance[ctxt_idx, context_ind[i]] = torch.tensor(info['mean_distance'])
 
     ################################
     # we use multi-process for the simulation
@@ -171,18 +171,18 @@ class Pushing_Sim(BaseSim):
                      sum(mode_encoding[c, successes[c, :] == 1] == 3) / self.n_trajectories_per_context])
 
         mode_probs /= (mode_probs.sum(1).reshape(-1, 1) + 1e-12)
-        print(f'p(m|c) {mode_probs}')
+        # print(f'p(m|c) {mode_probs}')
 
         entropy = - (mode_probs * torch.log(mode_probs + 1e-12) / torch.log(
             torch.tensor(n_modes))).sum(1).mean()
 
-        wandb.log({'score': 0.5 * (success_rate + entropy)})
-        wandb.log({'Metrics/successes': success_rate})
-        wandb.log({'Metrics/entropy': entropy})
-        wandb.log({'Metrics/distance': mean_distance.mean().item()})
+        # wandb.log({'score': 0.5 * (success_rate + entropy)})
+        # wandb.log({'Metrics/successes': success_rate})
+        # wandb.log({'Metrics/entropy': entropy})
+        # wandb.log({'Metrics/distance': mean_distance.mean().item()})
 
-        print(f'Mean Distance {mean_distance.mean().item()}')
-        print(f'Successrate {success_rate}')
-        print(f'entropy {entropy}')
+        # print(f'Mean Distance {mean_distance.mean().item()}')
+        # print(f'Successrate {success_rate}')
+        # print(f'entropy {entropy}')
 
-        return successes, mode_encoding, mean_distance
+        return {'success_rate': success_rate, 'entropy': entropy.item(), 'mean_dist': mean_distance.mean().item()}
