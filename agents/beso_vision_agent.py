@@ -500,7 +500,7 @@ class BesoAgent(BaseAgent):
             n_sampling_steps = new_sampling_steps
         else:
             n_sampling_steps = self.num_sampling_steps
-
+        n_sampling_steps = 1
         if self.use_ema:
             self.ema_helper.store(self.model.parameters())
             self.ema_helper.copy_to(self.model.parameters())

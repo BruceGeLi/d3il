@@ -197,6 +197,9 @@ class Stacking_Sim(BaseSim):
             else:
                 pass
 
+            print(f"success_1: {info['success_1']}")
+            print(f"success_2: {info['success_2']}")
+
             successes[ctxt_id, context_ind[i]] = torch.tensor(info['success'])
             successes_1[ctxt_id, context_ind[i]] = torch.tensor(info['success_1'])
             successes_2[ctxt_id, context_ind[i]] = torch.tensor(info['success_2'])
