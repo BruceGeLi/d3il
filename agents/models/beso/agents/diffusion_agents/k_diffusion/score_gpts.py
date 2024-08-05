@@ -45,6 +45,13 @@ class CausalSelfAttention(nn.Module):
                 1, 1, block_size, block_size
             ),
         )
+
+        self.register_buffer(
+            "mask1",  # add +1 for CTM
+            torch.tril(torch.ones(block_size+1, block_size+1)).view(
+                1, 1, block_size+1, block_size+1
+            ),
+        )
         self.n_head = n_heads
 
     def forward(self, x):
@@ -67,7 +74,8 @@ class CausalSelfAttention(nn.Module):
 
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
-        att = att.masked_fill(self.mask[:, :, :T, :T] == 0, float("-inf"))
+        # att = att.masked_fill(self.mask[:, :, :T, :T] == 0, float("-inf"))
+        att = att.masked_fill(self.mask1[:, :, :T, :T] == 0, float("-inf"))
         att = F.softmax(att, dim=-1)
         att = self.attn_drop(att)
         y = att @ v  # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
@@ -150,6 +158,10 @@ class DiffusionGPT(nn.Module):
         seq_size = goal_seq_len + obs_seq_len + 1
         self.tok_emb = nn.Linear(state_dim, embed_dim)
         self.pos_emb = nn.Parameter(torch.zeros(1, seq_size, embed_dim))
+
+        # Note: support CTM, set to nn.Parameter(torch.zeros(1, 2, embed_dim))
+        # self.noise_pos_emb = None
+
         self.drop = nn.Dropout(embed_pdrob)
         
         # needed for classifier guidance learning
@@ -239,6 +251,7 @@ class DiffusionGPT(nn.Module):
 
         # special case the position embedding parameter in the root GPT module as not decayed
         no_decay.add("pos_emb")
+        no_decay.add("noise_pos_emb")  # for CTM usage
 
         # validate that we considered every parameter
         param_dict = {pn: p for pn, p in self.named_parameters()}
@@ -281,6 +294,18 @@ class DiffusionGPT(nn.Module):
         b, t, dim = states.size()
         assert t <= self.block_size, "Cannot forward, model block size is exhausted."
         # get the sigma embedding
+        if "noise_pos_emb" in self.__dict__["_parameters"].keys():
+            assert isinstance(sigma, list) and len(sigma) == 2
+            stop = sigma[1]
+            sigma = sigma[0]
+            stops = stop.log() / 4
+            stops = einops.rearrange(stops, 'b -> b 1')
+            emb_s = self.sigma_emb(stops.to(torch.float32))
+            if len(states.shape) == 3 and len(emb_s.shape) == 2:
+                emb_s = einops.rearrange(emb_s, 'b d -> b 1 d')
+        else:
+            pass
+
         sigmas = sigma.log() / 4
         sigmas = einops.rearrange(sigmas, 'b -> b 1')
         emb_t = self.sigma_emb(sigmas.to(torch.float32))
@@ -291,6 +316,15 @@ class DiffusionGPT(nn.Module):
             second_half_idx = self.goal_seq_len + 1 
         else:
             second_half_idx = 1
+
+        if "noise_pos_emb" in self.__dict__["_parameters"].keys():
+            # noise_pos_emb = nn.Parameter(torch.zeros(2, embed_dim))
+            emb_t += self.noise_pos_emb[0]
+            emb_s += self.noise_pos_emb[1]
+            second_half_idx += 1
+        else:
+            pass
+
         # during training randomly mask out the goal
         # to train the conditional model with classifier-free guidance wen need 
         # to 0 out some of the conditional during training with a desrired probability
@@ -333,11 +367,17 @@ class DiffusionGPT(nn.Module):
         sa_seq = torch.stack([state_x, action_x], dim=1
                             ).permute(0, 2, 1, 3).reshape(b, 2*t, self.embed_dim)
         
-        # next we stack everything together 
-        if self.goal_conditioned:
-            input_seq = torch.cat([emb_t, goal_x, sa_seq], dim=1)
+        # next we stack everything together
+        if "noise_pos_emb" in self.__dict__["_parameters"].keys():
+            if self.goal_conditioned:
+                input_seq = torch.cat([emb_t, emb_s, goal_x, sa_seq], dim=1)
+            else:
+                input_seq = torch.cat([emb_t, emb_s, sa_seq], dim=1)
         else:
-            input_seq = torch.cat([emb_t, sa_seq], dim=1)
+            if self.goal_conditioned:
+                input_seq = torch.cat([emb_t, goal_x, sa_seq], dim=1)
+            else:
+                input_seq = torch.cat([emb_t, sa_seq], dim=1)
         
         # Note we need to also adept the action masks 
         x = self.blocks(input_seq)
