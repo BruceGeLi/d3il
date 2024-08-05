@@ -647,7 +647,7 @@ class BesoAgent(BaseAgent):
         """
         Method to load a pretrained model weights inside self.model
         """
-        self.model.load_state_dict(torch.load(os.path.join(weights_path, sv_name)))
+        self.model.load_state_dict(torch.load(os.path.join(weights_path, sv_name)), strict=False)  # strict=False for CTM
         self.ema_helper = ExponentialMovingAverage(self.model.get_params(), self.decay, self.device)
         log.info('Loaded pre-trained model parameters')
 
